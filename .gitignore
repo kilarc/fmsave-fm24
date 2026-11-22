@@ -1,0 +1,56 @@
+# Private material and saves
+/.local/
+*.fm
+*.fm.*
+*.fm (copy)
+games/
+
+# FM data and extracted output: never commit
+*.csv
+*.xlsx
+*.dat
+*.lnc
+fm24_csv/
+fm24_dump/
+src/fmsave/fm24_competition_names_ko.json
+FM24_VALIDATION.json
+README_FM24*.md
+
+# Local machine files
+runtime_python.txt
+.fm24-env/
+wheels/
+*.whl
+*.zip
+*.cmd
+!run.cmd
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Tests, coverage, fuzzing
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.benchmarks/
+crash-*
+leak-*
+timeout-*
+oom-*
+
+# Tools
+.ruff_cache/
+.playwright-mcp/
+
+# Docs
+docs/_build/
+
+# The web app smoke check installs Pyodide here.
+scripts/app-smoke/node_modules/

@@ -1,0 +1,354 @@
+@goto :fm24_launch
+# -*- coding: utf-8 -*-
+r"""FM24 세이브 -> CSV (단일 파일 실행본)
+
+이 .cmd 파일은 첫 줄만 명령 프롬프트가 읽고, 나머지는 전부 파이썬 코드입니다.
+
+사용법
+  1. 이 파일을 더블클릭하고 세이브(.fm)를 고릅니다.
+  2. 또는 세이브 파일을 이 파일 위로 끌어다 놓습니다.
+  3. 또는 터미널에서: fm24_to_csv.cmd "세이브.fm" [-o 출력폴더] [--no-pause]
+
+결과
+  이 파일과 같은 폴더의 fm24_csv\\<세이브 이름>__<게임 날짜>\\ 에
+  테이블별 CSV(엑셀에서 한글이 보이는 UTF-8 BOM)와 _요약.csv가 생깁니다.
+  원본 세이브는 임시 복사본으로 읽고, 실행 전후 SHA-256을 비교합니다.
+
+필요한 것
+  Python 3.14 이상 (3.12/3.13은 backports.zstd 설치 필요)
+
+구성
+  rhiever/fmsave 0.12.5(MIT)에 FM24(24.4.2) 판독을 추가한 패키지를 이 파일 끝에
+  압축해 넣었습니다. 실행할 때 임시 폴더에 풀어 씁니다. 라이선스 원문은 파일 끝에 있습니다.
+  해석 메모와 미지원 항목은 fm24_tool_v6_full.zip의 README_FM24_V6.md를 보세요.
+:fm24_launch
+@echo off
+setlocal
+set "FM24_LOCAL_PY=%USERPROFILE%\AppData\Local\Python\pythoncore-3.14-64\python.exe"
+if exist "%FM24_LOCAL_PY%" goto fm24_local
+where /q py
+if errorlevel 1 goto fm24_python
+py -3 -x "%~f0" %*
+exit /b %errorlevel%
+:fm24_python
+python -x "%~f0" %*
+exit /b %errorlevel%
+:fm24_local
+"%FM24_LOCAL_PY%" -x "%~f0" %*
+exit /b %errorlevel%
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import csv
+import hashlib
+import os
+import shutil
+import sys
+import tempfile
+import time
+import warnings
+from datetime import datetime
+from pathlib import Path
+
+TABLES = (
+    "clubs",
+    "players",
+    "contracts",
+    "suspensions",
+    "managed_clubs",
+    "nations",
+    "stages",
+    "competitions",
+    "fixtures",
+    "officials",
+    "league_tables",
+    "transfer_windows",
+    "competition_rules",
+    "player_match_stats",
+    "team_match_stats",
+    "player_season_stats",
+    "player_season_history",
+    "stadiums",
+    "finances",
+    "sponsorships",
+    "facilities",
+    "affiliates",
+    "job_vacancies",
+    "staff",
+    "staff_lists",
+    "injury_types",
+    "injuries",
+    "training",
+    "mentoring",
+    "tactics",
+    "set_pieces",
+    "selections",
+    "squad_planner",
+    "media_predictions",
+    "injury_episodes",
+    "historical_league_positions",
+    "starting_loan_terms",
+    "matched_live_loans",
+    "club_finance_snapshots",
+    "last_transfer_terms",
+    "injury_link_keys",
+    "match_results",
+)
+STATUS_TEXT = {"decoded": "추출됨", "empty": "행 없음", "unsupported": "미지원", "error": "오류"}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _load_fmsave():  # noqa: ANN202 - the module is only importable after this runs
+    if sys.version_info < (3, 12):
+        raise SystemExit("Python 3.12 이상이 필요합니다. https://www.python.org 에서 설치하세요.")
+    data = base64.b64decode(_PAYLOAD)
+    target = Path(tempfile.gettempdir()) / f"fm24_to_csv_{hashlib.sha256(data).hexdigest()[:16]}.zip"
+    if not target.is_file() or target.stat().st_size != len(data):
+        partial = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+        partial.write_bytes(data)
+        partial.replace(target)
+    sys.path.insert(0, str(target))
+    try:
+        import fmsave
+    except ImportError as error:
+        if "zstd" in str(error).lower():
+            raise SystemExit(
+                "이 Python에는 zstd 압축 모듈이 없습니다. Python 3.14 이상으로 실행하거나 "
+                "'py -m pip install backports.zstd' 후 다시 실행하세요."
+            ) from error
+        raise
+    return fmsave
+
+
+def _documents_folder() -> Path:
+    try:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(260)
+        # CSIDL_PERSONAL: the user's Documents folder, following a OneDrive redirect.
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buffer) == 0:
+            return Path(buffer.value)
+    except (AttributeError, OSError):
+        pass
+    return Path.home() / "Documents"
+
+
+def _pick_save() -> Path | None:
+    games = _documents_folder() / "Sports Interactive" / "Football Manager 2024" / "games"
+    try:
+        import tkinter
+        from tkinter import filedialog
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        chosen = filedialog.askopenfilename(
+            parent=root,
+            title="CSV로 추출할 FM24 세이브 선택",
+            initialdir=str(games) if games.is_dir() else None,
+            filetypes=[("Football Manager 세이브", "*.fm"), ("모든 파일", "*.*")],
+        )
+        root.destroy()
+        return Path(chosen) if chosen else None
+    except Exception:  # noqa: BLE001 - fall back to typing the path
+        try:
+            typed = input("세이브(.fm) 경로를 붙여넣거나 이 창으로 끌어다 놓고 Enter: ")
+        except EOFError:
+            return None
+        typed = typed.strip().strip('"')
+        return Path(typed) if typed else None
+
+
+def _copy_with_bom(source: Path, target: Path, attempts: int = 20) -> None:
+    """Copy a finished CSV into place with a UTF-8 BOM, retrying while OneDrive holds it."""
+    for attempt in range(attempts):
+        try:
+            with source.open("rb") as reader, target.open("wb") as writer:
+                writer.write(b"\xef\xbb\xbf")
+                shutil.copyfileobj(reader, writer)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5)
+
+
+def _first_line(text: str, limit: int = 200) -> str:
+    line = " ".join(str(text).split())
+    return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def extract(save: Path, out_root: Path) -> tuple[Path, list[dict[str, object]], bool]:
+    """Every table of one save as CSV. Returns (folder, summary rows, source unchanged)."""
+    fmsave = _load_fmsave()
+    from fmsave.fm24_csv import write_table_csv
+    source_hash = _sha256(save)
+    rows: list[dict[str, object]] = []
+    with tempfile.TemporaryDirectory(prefix="fm24_to_csv_") as temporary:
+        copied = Path(temporary) / save.name
+        print("세이브를 임시 폴더로 복사하는 중...", flush=True)
+        shutil.copy2(save, copied)
+        if _sha256(copied) != source_hash:
+            raise SystemExit("복사하는 동안 세이브가 바뀌었습니다. 게임 저장이 끝난 뒤 다시 실행하세요.")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with fmsave.open(copied) as career:
+                game_date = str(career.info.game_date or "날짜없음")
+                print(f"{career.info.game} {career.info.build}, 게임 날짜 {game_date}", flush=True)
+                folder = out_root / f"{save.stem}__{game_date}"
+                if folder.exists():
+                    folder = out_root / f"{save.stem}__{game_date}__{datetime.now():%Y%m%d_%H%M%S}"
+                folder.mkdir(parents=True)
+                for index, name in enumerate(TABLES, start=1):
+                    began = time.monotonic()
+                    warning_start = len(caught)
+                    # Written in the temporary folder first, then copied in one go, so a synced
+                    # output folder (OneDrive) never sees a rename it can lock.
+                    pending = Path(temporary) / f"{name}.csv"
+                    row: dict[str, object] = {"table": name, "rows": "", "note": ""}
+                    try:
+                        table = getattr(career, name)()
+                        write_table_csv(table, name, career.info.build, pending, career)
+                        _copy_with_bom(pending, folder / f"{name}.csv")
+                        pending.unlink(missing_ok=True)
+                        row.update(status="decoded" if len(table) else "empty", rows=len(table))
+                    except fmsave.UnsupportedGameError as error:
+                        pending.unlink(missing_ok=True)
+                        row.update(status="unsupported", note=_first_line(error))
+                    except Exception as error:  # noqa: BLE001 - one table failing is reported, not fatal
+                        pending.unlink(missing_ok=True)
+                        row.update(status="error", note=_first_line(f"{type(error).__name__}: {error}"))
+                    new_warnings = [str(item.message) for item in caught[warning_start:]]
+                    if new_warnings and not row["note"]:
+                        row["note"] = _first_line("경고: " + new_warnings[0])
+                    row["seconds"] = round(time.monotonic() - began, 1)
+                    rows.append(row)
+                    shown = f"{row['rows']}행" if row["rows"] != "" else ""
+                    status_text = STATUS_TEXT[str(row["status"])]
+                    print(f"[{index:2}/{len(TABLES)}] {name}: {status_text} {shown}", flush=True)
+    unchanged = _sha256(save) == source_hash
+    with (folder / "_요약.csv").open("w", newline="", encoding="utf-8-sig") as summary:
+        writer = csv.writer(summary)
+        writer.writerow(("테이블", "상태", "행 수", "걸린 시간(초)", "메모"))
+        for row in rows:
+            writer.writerow(
+                (row["table"], STATUS_TEXT[str(row["status"])], row["rows"], row["seconds"], row["note"])
+            )
+        writer.writerow(())
+        writer.writerow(("원본 세이브", save.name, "변경 없음" if unchanged else "실행 중 변경됨"))
+    return folder, rows, unchanged
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="FM24 세이브의 모든 테이블을 CSV로 추출합니다.")
+    parser.add_argument("save", nargs="?", type=Path, help=".fm 세이브 (생략하면 파일 선택 창)")
+    parser.add_argument("-o", "--out", type=Path, help="출력 폴더 (기본: 이 파일 옆 fm24_csv)")
+    parser.add_argument("--no-pause", action="store_true", help="끝난 뒤 Enter를 기다리지 않음")
+    arguments = parser.parse_args(argv)
+    pause = not arguments.no_pause
+    try:
+        save = arguments.save if arguments.save is not None else _pick_save()
+        if save is None:
+            print("세이브를 고르지 않아 종료합니다.")
+            return 0
+        save = save.expanduser().resolve()
+        if not save.is_file():
+            print(f"세이브 파일이 없습니다: {save}")
+            return 2
+        out_root = (arguments.out or Path(__file__).resolve().parent / "fm24_csv").resolve()
+        started = time.monotonic()
+        folder, rows, unchanged = extract(save, out_root)
+        counts = {status: sum(row["status"] == status for row in rows) for status in STATUS_TEXT}
+        print()
+        print(
+            f"완료 ({time.monotonic() - started:.0f}초): 추출 {counts['decoded']}개, "
+            f"행 없음 {counts['empty']}개, 미지원 {counts['unsupported']}개, 오류 {counts['error']}개"
+        )
+        print(f"출력 폴더: {folder}")
+        print("원본 세이브: " + ("변경 없음" if unchanged else "실행 중 변경됨 (결과는 복사 시점 기준)"))
+        if pause:
+            try:
+                os.startfile(folder)  # type: ignore[attr-defined]
+            except (AttributeError, OSError):
+                pass
+        return 1 if counts["error"] else 0
+    except KeyboardInterrupt:
+        print("\n중단했습니다.")
+        return 130
+    except SystemExit as stop:
+        if stop.code not in (None, 0) and not isinstance(stop.code, int):
+            print(stop.code)
+            return 1
+        raise
+    finally:
+        if pause:
+            try:
+                input("\nEnter를 누르면 창이 닫힙니다.")
+            except EOFError:
+                pass
+
+
+# ---- LICENSE ----
+# MIT License
+#
+# Copyright (c) 2026 Randal S. Olson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# ---- THIRD_PARTY_FM24_LICENSE.txt ----
+# FM24 layout comparison reference: YanivGabay/fm-open-scout
+#
+# MIT License
+#
+# Copyright (c) 2026 Yaniv Gabay
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+_PAYLOAD = """
+@@PACKAGE_BASE64@@
+"""
+
+if __name__ == "__main__":
+    raise SystemExit(main())

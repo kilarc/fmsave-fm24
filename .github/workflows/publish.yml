@@ -1,0 +1,123 @@
+name: Publish
+
+# Publishing never starts on its own. It runs only when someone starts it by hand and
+# names the version, and it refuses to run at all while the repository is private.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without a leading v (for example 0.2.0)"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  allowed:
+    name: Check publishing is allowed
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Refuse to publish a private repository
+        env:
+          REPOSITORY_IS_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [ "${REPOSITORY_IS_PRIVATE}" != "false" ]; then
+            echo "This repository is private. Publishing stays closed until it is public." >&2
+            exit 1
+          fi
+          echo "Repository is public; publishing is allowed."
+
+  build:
+    name: Build distributions
+    needs: allowed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.12"
+          enable-cache: false
+      - name: Build distributions
+        run: uv build
+      - name: Check distributions
+        run: uv run --no-project python scripts/check_dist.py dist
+      - name: Check the requested version matches the project version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          project_version="$(uv version --short)"
+          if [ "${REQUESTED_VERSION}" != "${project_version}" ]; then
+            echo "Asked to publish ${REQUESTED_VERSION} but the project is ${project_version}" >&2
+            exit 1
+          fi
+      - name: Upload distributions
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  smoke:
+    name: Smoke test (Python ${{ matrix.python-version }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.14"]
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: false
+      - name: Run the installed wheel in an isolated environment
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          uv run --isolated --no-project --python "${PYTHON_VERSION}" --with dist/*.whl fmsave --version
+          uv run --isolated --no-project --python "${PYTHON_VERSION}" --with dist/*.whl python -c "import fmsave; assert fmsave.__version__"
+
+  publish:
+    name: Publish to PyPI
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: pypi
+    permissions:
+      id-token: write # PyPI trusted publishing and attestations
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  docs:
+    name: Redeploy the docs and web app
+    needs: publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml # zizmor: ignore[self-repository]
+    with:
+      wait-for-version: ${{ inputs.version }}

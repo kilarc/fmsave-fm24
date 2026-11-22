@@ -1,0 +1,532 @@
+# Changelog
+
+This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.12.5] - 2026-11-14
+
+### Fixed
+
+- Warn and keep reading players with unique UIDs when other player records share a UID.
+  References to those records stay unresolved. Strict mode still raises. (#102)
+
+Thanks to @absalom12 for the report. Refs #102.
+
+## [0.12.4] - 2026-11-13
+
+### Added
+
+- Label 10 training session codes and 6 sponsorship types in FM26. Both exports keep the
+  original codes. (#11, #46)
+- Add `PlayerSeasonStats.minutes_since_last_goal` for overall club statistics in FM26 and FM27.
+- Add `PlayerMatchStats.entered_at_minute` for substitute appearances in FM26 and FM27.
+
+### Changed
+
+- Mark `Stadium.seated_capacity` and `Stadium.capacity` as verified after checking their figures
+  on the Facilities screen in FM26 and FM27. (#38)
+- Mark season penalties, red cards, mistakes leading to goals, clean sheets, goals allowed, and
+  save percentage as verified.
+- Mark player match assists, minutes played, and departure minute as verified.
+
+### Fixed
+
+- Staff validation recognizes 2 additional formation IDs in FM26 and FM27. (#90)
+- Read an additional form of European suspensions in FM26 and FM27. (#8)
+
+Thanks to @jeohist for the reports, @thetowny for the report, and @hostlund for help testing. Refs #8, #11, #38, #46, and #90.
+
+## [0.12.3] - 2026-11-12
+
+### Fixed
+
+- Try an available FM27 layout when a section schema is unfamiliar. Warn when borrowing a
+  different schema, and report decode failures when the data does not fit.
+- Read team match reports, officials, and squad planners on unverified builds when their data
+  fits an existing layout. Validation identifies borrowed match report layouts and explains
+  structural failures the reader can report without save data.
+
+Thanks to @GiorgioGandolfi88 for the report. Refs #86.
+
+## [0.12.2] - 2026-11-11
+
+### Fixed
+
+- `team_match_stats()` uses the spacing between team entries to identify the home and away teams. (#85)
+- `team_match_stats()` keeps reports that were dropped when the header was mistaken for the start
+  of a squad. (#86)
+
+Thanks to @GiorgioGandolfi88 for the reports. Refs #85 and #86.
+
+## [0.12.1] - 2026-11-10
+
+### Fixed
+
+- `training()` and `mentoring()` read FM27 `27.0.1+2494687` saves whose training blocks carry
+  a value after their mentoring groups, where `27.0.0` leaves zero. The value is not decoded;
+  the validation report counts the blocks that carry one as `nonzero_block_trailers`. (#82)
+
+Thanks to @javiercostoya for the report. Refs #82.
+
+## [0.12.0] - 2026-11-10
+
+### Added
+
+- Read each team's match stats screen figures, 2 rows per match, for every match whose report
+  the save keeps, on FM26 26.3.1 and 26.3.2 and FM27 `27.0.0+2486695`. Use `team_match_stats()`
+  in Python or the `team-match-stats` export, and join rows to `fixtures()` on
+  `competition_id`, `home_team_id`, `away_team_id`, and `date`. FM27 fields stay unconfirmed in
+  the validation report until they are checked against the game. (#80)
+
+Thanks to @GiorgioGandolfi88 for researching per-match team statistics. Refs #80.
+
+## [0.11.0] - 2026-11-08
+
+### Added
+
+- Read numbered squad planner slots for the current season and the next 2 seasons in
+  single-manager saves on FM27 build `27.0.0+2486695`. Use `squad_planner()` in Python
+  or the `squad-planner` export. (#77)
+
+### Changed
+
+- Renamed `Fixture.match_record_id` and its export column to `referee_id`. On registered FM26
+  and FM27 builds, the ID can repeat across fixtures and joins to the new
+  `Save.officials()` table. The output schema version is now 4. (#76)
+
+Thanks to @GiorgioGandolfi88 for the report and @javiercostoya for researching the squad planner. Refs #76 and #77.
+
+## [0.10.1] - 2026-11-08
+
+### Changed
+
+- FM27 validation marks staff age, birth date, and contract end date verified. (#66)
+- FM27 validation marks the 21 staff ratings added in 0.10.0 verified. (#68)
+
+### Fixed
+
+- FM27 `finances()` returns validated monthly rows when only the sponsorship checks fail. `sponsorships()` raises for failed blocking checks in strict mode. (#75)
+- FM27 readers return decoded data with warnings by default. Strict mode is opt-in for both game editions. The web app shows reader warnings beside the data. (#75)
+- Population, coverage, and career-state checks warn even in strict mode. This includes age and height ranges, minimum record counts, suspension rates, and match-minute expectations. Empty optional populations no longer fail integrity checks with no records to compare. (#75)
+- Job vacancies remain readable without a save clock, with a warning about unavailable clock validation. Dates within each record are still checked. Explicit empty tactics inventories remain readable when their declared counts agree. (#75)
+
+Thanks to @ironkay-beep for the report and @paul-anthony-oneill and @menidi for help testing. Refs #66, #68, and #75.
+
+## [0.10.0] - 2026-11-05
+
+### Added
+
+- Read 21 additional FM27 staff ratings at their stored scales. Each rating is unconfirmed. (#68)
+
+### Fixed
+
+- Read additional FM27 tactics that previously caused `tactics()`, `set_pieces()`, and `selections()` to fail validation. (#67)
+- Windows development checks: the POSIX resource-limit test now has a platform guard that the type checker understands, and the staged-file guard test no longer requires filesystem symlink support. (#67)
+
+### Changed
+
+- The web app's error screen has a Copy report button. It copies the fmsave and Pyodide versions, the game and build when known, and the error, without the file name or anything from the save.
+- The README, CONTRIBUTING.md and issue forms say what helps most in a report: a save sent privately, then your own format findings, then `fmsave validate` output and cropped screenshots. Posting a save, or a link to one, stays off limits.
+- Compatibility: `Stadium.all_seater_capacity` is renamed `total_capacity`, since it holds the ground's total capacity, seated and standing together, not the seated figure. The export column is renamed the same way. The output schema version is now 3. (#38)
+- Docs: `Stadium.capacity` is the capacity used in normal matches, and a zero `seated_capacity` means the game shows a single figure with no seated part. Both are from one FM27 ground each and stay unconfirmed. (#38)
+
+Thanks to @jeohist for help testing and @menidi for the report and for researching staff ratings. Refs #38, #67, #68.
+
+## [0.9.3] - 2026-11-02
+
+### Added
+
+- Validation reports more `tactics` counts about tactic records stored under a signature fmsave does not list: `unlisted_record_units`, the setting units in the records read, and `unexpected_unit_separators`, those whose separator byte is not the usual value. Those units are also counted by value as `unit_separator_<value>`, by slot block as `unit_separator_block<block>`, and by place in the block as `unit_separator_unit<unit>`, each appearing only when nonzero. (#31)
+- `tactics()`, `set_pieces()` and `selections()` read FM27 saves whose set-piece routines have names, such as a career carried over from FM26, instead of raising `UnsupportedGameError`. The names come back in `SetPieceRoutine.name` as on FM26, and every routine group must still be read whole for the `set_pieces` checks to pass. Saves with only unnamed routines read as before. (#56)
+
+### Fixed
+
+- `tactics()` reads tactic records stored under a signature fmsave does not list when some of their setting units store a value other than the usual one in the byte between their two bit fields. That byte is counted in validation rather than shipped, and every other check on these records still applies. Records under a listed signature are read as before. (#31)
+- A save whose `game_info` filename list claims more entries than fmsave allows now raises `ReaderCheckError` saying the save layout differs from what fmsave expects and asking for a report, instead of `CorruptSaveError` saying the file is damaged and to wait or copy it. Such a count comes from a layout fmsave does not know, not from a damaged file. The command line exits with status 3 for it rather than 1. (#56)
+- FM27 saves whose `game_info` filename list holds entries now open. fmsave read the list's count two bytes too early on FM27, so such a save was refused as a layout mismatch. Saves with an empty list read as before. (#56)
+- `training()` and `mentoring()` on FM27 read saves whose training section holds per-person header entries or mentoring groups, such as a career carried over from FM26, instead of raising `UnsupportedGameError`. fmsave read an FM27 team block's mentoring group count four bytes too late and its groups in the FM26 shape. A block whose groups are followed by bytes that are not zero still raises `UnsupportedGameError`. Saves with no header entries and no groups read as before. (#56)
+- `staff()` and `staff_lists()` on FM27 count a staff code list stored as all zeros as one that is not set, rather than as codes outside the observed set, so `staff_codes_in_set` no longer fails on a save holding many of them. A list mixing zeros with other codes still counts against the check, and FM26 is unchanged. (#56)
+
+Thanks to @mameabdou24 for the report, @sebheusig for researching the FM27 game_info layout, and @OdumWorld for help testing. Refs #31, #56.
+
+## [0.9.2] - 2026-11-01
+
+### Added
+
+- Validation reports two `clubs` counts: `clubs_without_main_nation`, the clubs read with no league nation, and `teamless_rows_without_main_nation`, the club-table rows with no league nation and no team list, which stay left out. (#53)
+- Validation reports two more kinds of `tactics` counts: `unknown_signature_records_read`, and an `unknown_signature_byte<position>_<value>` count for each byte where a tactic record's signature differs from the ones fmsave lists. (#31)
+
+### Changed
+
+- Compatibility: `Club.nation_id` is now `int | None`. It is None for clubs the game stores with no league nation, such as some school and university teams; `fa_nation_id` is still set for them. Code that assumes an int, such as sorting or indexing by it, needs to handle None. In exports the column is empty for these clubs, and they fall in no `--nation` scope. (#53)
+
+### Fixed
+
+- `clubs()` now reads clubs the game stores with no league nation when they have a team list, such as school and university teams. Players home grown at those clubs get their `home_grown_club_uids` and `home_grown_club_names` instead of None. Rows with no league nation and no team list are still left out. (#53)
+- `tactics()` reads tactic records stored under a signature variant fmsave does not list, so `tactic_records_count_matching` no longer fails because of one. A team's records are read this way only when every record its count claims is found whole; otherwise the check still fails as before. (#31)
+
+Thanks to @guyluzon64 for the report and @OdumWorld for help testing. Refs #31, #53.
+
+## [0.9.1] - 2026-11-01
+
+### Added
+
+- Validation reports five more `tactics` counts that show why a team has no tactic rows: `empty_tactic_blocks`, `flagged_tactic_counts`, `missing_tactics`, `unknown_signature_records`, and `signatures_after_routines`. (#31)
+- `fmsave export league-tables` and `injury-types` print a note on standard error when they write no rows. (#31)
+- Validation reports six `players` counts that say where unresolved home-grown club references point: `home_grown_refs_to_extended_rows`, `home_grown_refs_to_unanchored_rows`, `home_grown_refs_to_rejected_rows`, `home_grown_refs_out_of_range`, `home_grown_refs_empty`, and `home_grown_refs_other`. (#53)
+
+### Changed
+
+- FM27 build 27.0.0+2486695 now reports `known_build` true; its fields stay unconfirmed and `fmsave info` still shows partial coverage. (#31)
+- Unregistered FM27 builds open, borrowing 27.0.0+2486695 layouts where section schemas match. A reader whose section schema differs raises `UnsupportedGameError`, `known_build` stays false, `fmsave info` shows "unverified build", and `UnknownBuildWarning` says so.
+
+### Fixed
+
+- Large saves open however big they grow: fmsave no longer caps a save at fixed sizes (FM27 at 256 MiB for one part and 512 MiB in all, FM26 at 1 GiB and 4 GiB). A part past 64 MiB that claims or decompresses to more than 64 times its compressed size, or a save whose parts add up to more than 32 times its file size, raises `CorruptSaveError` before that memory is spent. The message gives the ratio and asks for a report if the game opens the save. (#52)
+- `experimental_span()` reads large FM27 spans: its 128 MiB, 256 MiB, 100,000-fixture and 4,096-rule limits are gone, and its count limits grow with the span. (#52)
+- The app asks for a report when a fresh copy of a save still reads as damaged. (#52)
+- Docs: injury types and league tables can be empty before a season's first matches. (#31)
+- `players()` no longer fails `home_grown_club_refs_resolved` on saves where many players are home grown at clubs the club reader leaves out. References to unanchored or rejected club-table rows are left out of that check, since they point at real club records; they still read as None and are counted in the new validation counts. References to extended rows, past the table's end, or empty still count against the check. (#53)
+
+Thanks to @guyluzon64 and @rui7avares-create for the reports, and @OdumWorld and @jeohist for help testing. Refs #31, #52, #53.
+
+## [0.9.0] - 2026-10-30
+
+### Added
+
+- FM27 reads `fixtures()`, `league_tables()`, and `competition_rules()` (fields unconfirmed). (#42)
+- FM27 reads `injuries()`, `injury_types()`, and `player_match_stats()` with populated histories (fields unconfirmed). (#45)
+- FM27 reads `suspensions()`; ban coverage is not yet compared with the game. (#8)
+- FM27 `tactics()` and `set_pieces()` read careers with a saved tactic. (#43)
+- `selections()` and the `selections` export table: each managed team's stored picks (fields unconfirmed). (#43)
+- `Staff.job` and `StaffJob` on FM27, with 17 job codes named. (#44)
+- FM27 `staff()` rows for club roles held with no contract, such as the chairperson. (#44)
+- `TrainingWeek.days`: each week's 7 days and their sessions. (#46)
+- `ManagedClub.balance`, `scouting_budget`, and `scouting_budget_remaining` on FM27 (unconfirmed; None on FM26). (#47)
+- Validation reports a `suspension_entries_minimum` check.
+
+### Changed
+
+- `LeagueTableRow.rounds_per_venue` is `int | None`: None, with no `matches`, for a row stored without match slots.
+- On FM27, a table row's won, drawn, and lost can add up to fewer than played in some cup group stages.
+- 11 `TacticPosition` bits are labelled, on FM26 too, so export position labels change. (#43)
+- `Staff` gains `job` after `team_slot`, which moves later CSV columns and breaks positional construction. (#44)
+- On FM27, contract offers no longer appear as `staff()` rows or replace real terms. (#44)
+- On FM27, a failed suspension check stops only `suspensions()`; a failed selection check stops only `selections()`. (#8, #43)
+- FM27 `stadiums()` reads with `home_club_uids` unknown when the calendar fails its checks. (#42)
+- The `neutral_venue_votes` validation count now counts teams, not clubs.
+- `fmsave info` shows the FM27 build as partial coverage, not unknown.
+
+### Fixed
+
+- FM26 table rows without match slots no longer read match rows from unrelated bytes or split their table.
+- `fixtures()` no longer marks first-team home matches neutral when reserve or youth sides use other grounds.
+- Unregistered free agents no longer get another person's contract end.
+- `managed_clubs()` finds `manager_staff_uid` when a second person header carries his id.
+- The web app keeps the open save working after another file fails to open.
+- Docs: FM26 `player_match_stats()` rows include friendlies, internationals, and other teams' matches.
+- Docs: `has_stats` false, the contract in effect, money units, mentoring labels, and competition id spaces.
+
+Thanks to @jeohist for the reports. Refs #8, #42, #43, #44, #45, #46, #47.
+
+## [0.8.1] - 2026-10-30
+
+### Added
+
+- `Stadium.seated_capacity` holds the seated capacity. `all_seater_capacity` is documented as the total.
+- Corporate facility ratings 3 and 4 read Fairly Basic and 16 reads Excellent. A new `NONE` rating covers 0.
+- FM27 sponsorship kinds named on the game's Sponsorships screen have labels.
+
+### Fixed
+
+- `stadiums()` includes the first ground in the stadium table, so its club's home matches resolve.
+- `Stadium.built_date` and `rebuilt_date` keep years before 1900.
+- `goals_outside_box` is now empty on FM26, as on FM27, because the stored count can exceed goals.
+- FM27 `experimental_span()` and `validate` no longer report a healthy save as corrupt as it grows. The span is held in memory once.
+- The human manager's `staff()` row has their name on FM27. On a new FM26 career it no longer shows the next person's details.
+- League tables and competition rules no longer take the friendlies competition's id when friendlies cover the same clubs.
+- A save whose version string the game cannot write raises `UnsupportedGameError` instead of a raw error or the wrong edition's layouts.
+- A save opened by a relative path keeps working after the working folder changes.
+
+### Changed
+
+- CONTRIBUTING.md explains that changes come in through issues and how contributors are credited. The README lists contributors, and past changelog entries now thank the people whose reports, requests, testing and findings fed them.
+
+Thanks to @jeohist for the reports. Refs #9, #11, #37, #38, #39, #40, #41.
+
+## [0.8.0] - 2026-10-30
+
+### Added
+
+- FM27 build `27.0.0+2486695` opens through the normal library, command line, and web app reader. Other FM27 builds and unregistered layouts are rejected.
+- FM27 readers use strict checks and conservative memory budgets. Unsupported tables reject, and unconfirmed or unsupported fields keep their explicit status. This does not establish that every FM27 value is decoded correctly.
+- The app identifies FM27's unconfirmed field meanings and the reader version needed for FM27. Documentation now covers both editions and their coverage limits.
+- Fuzzing exercises a fictional FM27 seed through the real raw-span parser while retaining decompression caps.
+
+### Fixed
+
+- FM27 sponsorship lists retain boundary-date rows instead of losing the whole club's list. Rejected FM27 rows in a structurally located list now fail an explicit check, even when overall coverage passes. FM26 date boundaries and failure behavior remain unchanged; rejected lists gain a diagnostic count.
+
+- League-table points below zero, after a points deduction, read as negative instead of about 65,000.
+- `league_tables()` no longer returns one-club tables that hold an earlier state of a row kept in another table, which reported a stale record in first place. Validation counts them as `superseded_blocks`.
+- League-table match slots that do not hold one match whose score agrees with its result, such as slots counting two meetings or scoring hundreds of goals, keep their slot and side with the other fields empty. Validation counts them as `unreadable_match_slots`.
+- `read_competition_names()` and `--competition-names` accept a file Excel saved as "CSV UTF-8". Its byte order mark no longer hides the first row. A file that is not UTF-8 raises an error that names it.
+- Opening a save refuses metadata sections far larger than any save writes, and `player_season_stats()` and `player_season_history()` keep to the total decompression cap, so a small damaged or crafted file cannot take minutes and gigabytes to read.
+- The web app's CSV downloads put an apostrophe before text a spreadsheet would run as a formula, as its list download already did. A CSV button no longer stays on "Writing" after another save is opened.
+
+### Changed
+
+- Validation reports `edited_attribute_players` for players stored past the 1 to 100 raw attribute scale, and the club-table rows that give no club by reason: `extended_table_rows`, `unanchored_table_rows` and `rejected_table_rows`.
+
+Thanks to @OdumWorld for the report and help testing, and @jeohist for the FM27 comparison. Refs #31.
+
+## [0.7.0] - 2026-10-28
+
+### Added
+
+- A [web app](https://rhiever.github.io/fmsave/app/) reads your save in the browser, with squad and player views, filters, shortlists, and CSV downloads. No Python installation is needed, and your save stays on your computer.
+- The web app uses the latest published fmsave release.
+- Shared links to the web app and docs include page previews. The docs also provide a sitemap and `llms.txt`.
+- `nations()` pairs save-local nation IDs with game database IDs for looking up names in an external list. The `nations` CLI export provides the same table.
+- `Club.gender` identifies men's and women's clubs. Unknown codes retain their original value in exports.
+
+### Fixed
+
+- Valid clubs at the start of the club list are included, with their database IDs and team links. Club uid 0 is valid; use `is not None` when checking whether a club reference resolved.
+- Club team lists use the club's recorded teams, fixing missing or incorrect squad links.
+- Clubs with long names are included.
+- `Club.unique_id` matches the game's club database ID. Re-export club IDs saved with earlier versions.
+- `clubs()` includes clubs whose nation ID is 0. Their players, contracts, staff, and fixtures join to them.
+- Fixtures, match records, and league tables include rows involving team 0, a national team.
+
+Thanks to @kdr6989 for the report.
+
+## [0.6.0] - 2026-10-24
+
+### Added
+
+- `player_season_history()` returns archived player statistics with the counts and computed rates of current-season rows. Each row carries an unconfirmed candidate season year and competition reference. Stored order may be nonchronological, and imported history may omit detailed counts.
+- `PlayerSeasonHistory` and the `player-season-history` CLI export table support the new reader. Club and nation scopes select players by current membership and retain their rows for previous teams.
+- Validation reports historical ownership counts and unresolved teams. Malformed or ambiguous history ownership raises `ReaderCheckError`.
+
+### Fixed
+
+- Missing player details stay empty when only another person's data is available. Players no longer borrow that person's name or other personal details, and archived statistics use the same ownership boundary.
+- Failed reader caches release decompressed save sections. Repeated calls raise the saved failure without decoding again.
+
+Thanks to @thaffy for the archive lead. Refs #13.
+
+## [0.5.11] - 2026-10-19
+
+### Fixed
+
+- `clubs()` now includes clubs whose valid nation references differ, including clubs playing across borders. Their teams are available to readers that join through the club index.
+- Club unique IDs and affiliate-parent links can now resolve through previously omitted clubs.
+- `tactics()` and `set_pieces()` no longer warn or fail strict validation solely because a managed club team has no stored tactics block. Checks for malformed, duplicate, or unread blocks remain enforced.
+- The `Sponsorship.annual_value` and `sponsorships()` docs no longer say an ended contract's annual value is zero. Ended contracts often keep a non-zero annual value, so filter on `end` to find running contracts.
+
+Refs #11.
+
+## [0.5.10] - 2026-10-10
+
+### Fixed
+
+- `finances()`, `sponsorships()` and `facilities()` no longer give a club the data of a club record stored after it that the club scan does not accept, such as a club playing in another nation's league. Such data was reported under the wrong club, or failed `finance_clubs_with_two_chains` when both clubs stored a series. Other readers are unaffected and no slower.
+
+Thanks to @Namhahaha1110 for the report. Refs #20.
+
+## [0.5.9] - 2026-10-10
+
+### Fixed
+
+- Name pools are found when their header stores nonzero values in a field that most saves leave at zero. Every other header byte, each pool entry and the uniqueness check are still verified.
+- The stage table is found however far it sits from the end of `game_db`. Longer careers move it further back, which made stages, competitions, fixtures, league tables, competition rules, match stats, stadiums and job vacancies fail.
+- Tactics validation accepts managers who also run national teams, whose tactic blocks the section stores alongside the club's.
+- Newly generated players stored with object kind 3, and newly generated staff whose ability codes are outside the observed code set, are read instead of being dropped.
+
+Thanks to @Namhahaha1110 for the report and help testing, and @Buglerru and @hostlund for help testing. Refs #5, #20.
+
+## [0.5.8] - 2026-10-07
+
+### Fixed
+
+- Unrecognized FM26 builds can open saves that use an already observed metadata layout, including older metadata variants, without requiring a build-specific registration.
+- Metadata detection rejects ambiguous or malformed candidates. Other readers retain their existing compatibility checks.
+
+Thanks to @jtstothard for the report. Refs #18.
+
+## [0.5.7] - 2026-10-06
+
+### Fixed
+
+- Name pools accept longer UTF-8 names, including names exceeding 64 bytes, while retaining entry IDs, section bounds and a 1,024-byte safety ceiling.
+- Injury labels accept Unicode space separators, including fullwidth and nonbreaking spaces used in localized text. Invalid UTF-8 and control characters remain rejected.
+
+Thanks to @1e16miin for the report. Refs #14.
+
+## [0.5.6] - 2026-10-06
+
+### Fixed
+
+- Continued careers with variable metadata now open without false build or date errors, including saves using Russian localization.
+- Localized names and larger player and staff populations read without rejecting valid tables.
+- Player, staff and injury readers handle additional record variants; tactics validation accepts the broader valid range.
+
+Thanks to @Buglerru for the report and help testing. Refs #5.
+
+## [0.5.5] - 2026-10-04
+
+### Added
+
+- `player_season_stats()` adds `possession_lost` and `non_penalty_expected_goals`, with `possession_lost_per_90` and `non_penalty_expected_goals_per_90`. All four are unconfirmed.
+- Saves from build 26.3.1 are read as a known build with the 26.3.2 layouts.
+- Saves from build 26.1.0 read the in-game date, so players, contracts, staff, injuries, finances and most other tables load. Fixtures, league tables, tactics and set pieces still fail their checks there, and the build is still reported as unknown.
+
+### Fixed
+
+- `job_vacancies()` reads job-centre records that store a list of ids; such saves no longer fail the section size check.
+- `set_pieces()` reads user routines whose tail flag differs from the usual value instead of merging them into the next routine.
+- `finances()` validation accepts a club's first month when its oldest row holds the opening balance, as series begun with the career do. Early-career saves no longer fail `finance_balance_continuity`. New anomaly `opening_balance_steps`.
+- `league_tables()` validation applies `double_round_robin_divisions` only once the fixture calendar shows enough divisions under way, so preseason saves no longer fail it. New anomaly `started_calendar_divisions`.
+- `facilities()` counts a club that stores no corporate-facilities rating (a zero in an all-zero block) as unset instead of out of range. Saves tracking many nations no longer fail its checks. New check `facility_unset_ratings` and anomaly `unset_ratings`.
+- The "game_info does not match build" error says which build check failed.
+
+Thanks to @thaffy for researching possession statistics, @BWH95 and @johnmmcparland for the feature requests, and @hostlund for help testing. Refs #4, #5.
+
+## [0.5.4] - 2026-09-30
+
+### Fixed
+
+- `tactics()` reads presets and alternate tactics. `tactics()` and `set_pieces()` support more continued careers. Validation checks complete team lists, including empty lists, with `tactic_records_count_matching`; unrelated tactics cannot fill gaps.
+- `stadiums()` excludes a spurious ground. Validation drops `stadiums.template_rows`.
+- `staff_lists()` keeps valid members beside empty references.
+- Player and staff readers recover missed people, contracts and season-stat joins. Club data no longer appears as staff contracts.
+- Retained contracts without substantive terms no longer count as current paid contracts when registration is absent and no independent current end date exists. Raw chains remain available.
+- `competition_rules()` recovers missed rounds, including in continued careers. Legacy `match_count` stays raw and is no longer a verified fixture count.
+- `fixtures()` recovers missing scores, rejects ambiguous or conflicting joins, keeps distinct fixtures with proven ownership, separates final scores from penalties, and leaves unplayed matches unscored.
+- `fixtures()` recovers omitted calendar rows, including unplayed and trailing fixtures, corrects played statuses, and excludes proven cached copies. Calendar checks still apply; neutral-venue flags use recovered fixtures.
+- `player_match_stats()` recovers stored histories with missing team references, excludes unrelated data, and detects incomplete or unresolved histories. Empty output passes validation only when every player explicitly has no stored history. Malformed histories no longer cause repeated scans.
+- `suspensions()` recovers entries with attached match records when the full list can be read.
+- `sponsorships()` respects each club's primary list, including empty lists, and retains historical contracts. Other sponsor-shaped data cannot replace an empty or invalid list.
+
+## [0.5.3] - 2026-09-29
+
+### Fixed
+
+- `set_pieces()` recovers missed routines, including multiple user routines per slot, and checks complete groups with `set_piece_blocks_complete`.
+- `players()` reads complete records with 0 current ability; their contracts no longer appear as staff contracts.
+- Fixture validation distinguishes stub teams from missing club joins with `fixture_club_teams_resolved`, without lowering the join threshold.
+
+Thanks to @hostlund for help testing. Refs #5.
+
+## [0.5.2] - 2026-09-29
+
+### Added
+
+- `Club.unique_id` helps match clubs across careers. `Club.uid` still joins within a save.
+
+### Fixed
+
+- `stages()` and dependent readers find older stage tables in continued careers.
+
+Thanks to @hostlund for the report and @matthiasvetter1104 for the feature request. Refs #5, #6.
+
+## [0.5.1] - 2026-09-28
+
+### Added
+
+- `player_season_stats()` adds 44 computed rates, including `expected_goals_per_90`, `pass_completion_percent` and `save_percent`. Every export includes them.
+
+## [0.5.0] - 2026-09-28
+
+### Added
+
+- `player_season_stats()` and the `player-season-stats` export: 56 current-season stats per competition type and team, including minutes, rating, xG, xA, passes, tackles, cards and saves. Types cover league, cup, continental, international, non-competitive, overall and 2 calendar-year totals.
+
+Thanks to @johnmmcparland for the feature request and @thaffy for researching season statistics. Refs #4.
+
+## [0.4.8] - 2026-09-28
+
+### Fixed
+
+- Careers started before a game update open without a false "game_info does not match build" error.
+- `stages()` and dependent readers find stage tables with more data stored after them.
+
+## [0.4.7] - 2026-09-27
+
+### Fixed
+
+- `finances()` labels months correctly on saves taken on a month's last day.
+
+## [0.4.6] - 2026-09-27
+
+### Fixed
+
+- `finances()`, `sponsorships()` and `facilities()` read clubs with only 1 or 2 months of finance history, including histories begun mid-career. Short histories must balance and show money movement.
+- Smaller databases, including FM26 Console saves, now supply most competition database IDs and no longer falsely fail competition validation.
+
+## [0.4.5] - 2026-09-26
+
+### Fixed
+
+- `fixtures()`, `league_tables()` and `player_match_stats()` handle dates around 2048. Fixtures were affected from 2040; player match statistics would have failed from 2047.
+
+## [0.4.4] - 2026-09-26
+
+### Added
+
+- `Player.unique_id` and `Staff.unique_id` identify people across careers started from the same database, directly after `uid` in exports. Deleted people's IDs may be reused.
+
+### Fixed
+
+- `Player.uid` and `Staff.uid` are documented as save-local join IDs, rather than database IDs. Values and joins are unchanged.
+
+## [0.4.3] - 2026-09-25
+
+### Fixed
+
+- Windows saves, including FM26 Console saves, no longer falsely fail with "game_info does not match build".
+- Smaller databases no longer fail name-pool checks that blocked players, contracts, staff and other name-resolving readers. Name IDs and lengths remain checked.
+
+Thanks to @GetChatGPTToDoIt and @johnmmcparland for the reports. Refs #1, #2.
+
+## [0.4.2] - 2026-09-24
+
+### Fixed
+
+- Stage-table misreads no longer cause false duplicate-stage errors, including on saves with many playable nations. This restores stages, competitions, fixtures, league tables and player match statistics.
+
+Thanks to @GetChatGPTToDoIt for the report. Refs #1.
+
+## [0.4.1] - 2026-09-21
+
+### Fixed
+
+- Pre-Continue saves use the summary date when the normal clock is absent.
+- Fresh saves no longer falsely fail checks for player attributes, complete join dates or matches without statistics.
+
+### Changed
+
+- Local single-player whole-save analysis is supported. `--all` remains explicit; save-derived data stays out of the repository, and support accepts no save uploads.
+
+## [0.4.0] - 2026-09-18
+
+The initial public release; earlier versions were never published.
+
+### Added
+
+- `fmsave.open(path)` opens an FM26 save as a read-only context manager. `Save.info` exposes game, build, database version and in-game date.
+- 26 readers returning `Table` records: `players()`, `contracts()`, `suspensions()`, `staff()`, `staff_lists()`; `clubs()`, `managed_clubs()`, `finances()`, `sponsorships()`, `facilities()`, `stadiums()`, `affiliates()`, `job_vacancies()`; `stages()`, `competitions()`, `fixtures()`, `league_tables()`, `competition_rules()`, `transfer_windows()`, `player_match_stats()`; `injury_types()`, `injuries()`; and managed-club `training()`, `mentoring()`, `tactics()`, `set_pieces()`.
+- Immutable `Table` queries: `where()`, `filter()`, `sorted_by()`, `find()`, `by_uid()`, `by_id()` and `coverage`. Exports: `to_dicts()`, `to_columns()`, `to_pandas()`, `to_polars()`, `write_csv()`, `write_json()` and `write_jsonl()`. Slices remain tables; records survive closing the save.
+- `fmsave.field_status` distinguishes verified and unconfirmed fields. `fmsave.OUTPUT_SCHEMA_VERSION` versions flat output.
+- User-supplied competition names through `competition_names=` and `fmsave.read_competition_names()`, keyed by database ID.
+- Reader checks warn by default; `strict=True` raises. `fmsave.validate_save` reports checks, counts and coverage without names, UIDs or save text.
+- `fmsave info`, `export` and `validate`, plus optional `pandas` and `polars` extras.
+
+### Notes
+
+- Requires Python 3.12+. Never modifies saves, connects to the network or reads the game install.
+- The 0.x API may change. Only 1 game build has been read; compatibility across format changes is untested.
+- Unreadable values are `None`; money keeps the save's unit; unidentified numbers remain raw.
+- Most competition, league, nation, city and ground names come from the game's installed database and are not shipped. See the README for coverage limits.

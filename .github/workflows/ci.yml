@@ -1,0 +1,317 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  paths:
+    name: Select checks
+    outputs:
+      extended: ${{ steps.paths.outputs.extended }}
+      dependency_audit: ${{ steps.paths.outputs.dependency_audit }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select PR checks
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          extended=true
+          dependency_audit=false
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            changed_paths="$RUNNER_TEMP/changed-paths"
+            if git diff --name-only --no-renames -z "$BASE_SHA" HEAD > "$changed_paths"; then
+              if [ -s "$changed_paths" ]; then
+                extended=false
+                while IFS= read -r -d '' path; do
+                  case "$path" in
+                    AGENTS.md|CLAUDE.md|CONTRIBUTING.md|scripts/dev-standards.md) ;;
+                    *) extended=true ;;
+                  esac
+                  case "$path" in
+                    pyproject.toml|uv.lock|scripts/app-smoke/package.json|scripts/app-smoke/package-lock.json)
+                      dependency_audit=true ;;
+                  esac
+                done < "$changed_paths"
+              fi
+            else
+              dependency_audit=true
+            fi
+          fi
+          echo "extended=$extended" >> "$GITHUB_OUTPUT"
+          echo "dependency_audit=$dependency_audit" >> "$GITHUB_OUTPUT"
+
+  dependency-audit:
+    name: Dependency audit
+    needs: paths
+    if: github.event_name == 'pull_request' && needs.paths.outputs.dependency_audit == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          warn-only: true
+          fail-on-scopes: runtime, development, unknown
+          comment-summary-in-pr: never
+          license-check: false
+          show-openssf-scorecard: false
+
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Structural checks only. The copied-text and denylist checks compare against the
+      # private folder, which is never present here, so they run in the pre-commit hook
+      # and not in CI. A green run here is not evidence that those checks passed.
+      - name: Repository guard
+        run: python3 scripts/guard.py --tracked
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check -
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: Secret scan of full history
+        run: ./gitleaks git --redact --no-banner --log-opts='--all --diff-merges=first-parent' .
+      - name: Audit automation configuration
+        env:
+          ZIZMOR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/check-zizmor.py --changed-since "$ZIZMOR_BASE" --format github
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --locked
+      - name: Lint
+        run: uv run --locked ruff check --output-format concise .
+      - name: Format check
+        run: uv run --locked ruff format --check .
+      - name: Type check
+        run: uv run pyright
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    needs: paths
+    if: needs.paths.outputs.extended == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.12"
+            coverage-args: ""
+          # Python 3.14 supports coverage.py's faster branch measurement core.
+          - python-version: "3.14"
+            coverage-args: --cov=fmsave --cov-report=term-missing
+          - python-version: "3.15.2"
+            coverage-args: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: false
+      - run: uv sync --locked --group ci
+      - name: Run tests
+        env:
+          COVERAGE_ARGS: ${{ matrix.coverage-args }}
+        shell: bash
+        run: |
+          read -r -a coverage_args <<< "$COVERAGE_ARGS"
+          uv run --locked --group ci pytest -n auto --maxprocesses=4 -m "not corpus" "${coverage_args[@]}"
+      - name: Build distributions
+        if: matrix.python-version == '3.12'
+        run: uv build
+      - name: Check distributions
+        if: matrix.python-version == '3.12'
+        run: uv run python scripts/check_dist.py dist
+      - name: Smoke test the wheel in an isolated environment
+        if: matrix.python-version == '3.12'
+        run: |
+          uv run --isolated --no-project --with dist/*.whl fmsave --version
+          uv run --isolated --no-project --with dist/*.whl python -c "import fmsave; assert fmsave.__version__"
+
+  docs:
+    name: Docs
+    needs: paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --locked --group docs
+      - name: Build docs
+        run: uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
+
+  web-app:
+    name: Web app reader in Pyodide
+    needs: paths
+    if: needs.paths.outputs.extended == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.14.10"
+          enable-cache: false
+      - run: uv sync --locked
+      - name: Build the wheel
+        run: uv build --wheel
+      - name: Write the example career
+        run: uv run python -c "from pathlib import Path; from tests.fixtures.career import career_fragment; career_fragment().write(Path('example-career.fm'))"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+      - name: Install the Pyodide the page pins
+        env:
+          NPM_SHA512: "ec73c0a64f807e53146af4ac78bd4f9ba0a762a3081e4e77c7e2a6ba1aa64c3a8f9233cc8312294cf713aac13dd4428dc3880504957d7e75e249d1a6d435eaf4"
+        run: |
+          npm_dir="$(mktemp -d "$RUNNER_TEMP/npm.XXXXXXXX")"
+          curl -fsSL -o "$npm_dir/npm.tgz" https://registry.npmjs.org/npm/-/npm-11.21.2.tgz
+          printf '%s  %s\n' "$NPM_SHA512" "$npm_dir/npm.tgz" | sha512sum --check -
+          tar -xzf "$npm_dir/npm.tgz" -C "$npm_dir"
+          node "$npm_dir/package/bin/npm-cli.js" ci --ignore-scripts --prefix scripts/app-smoke
+      - name: Read the example career in Pyodide with this branch's fmsave
+        run: node scripts/app-smoke/smoke.mjs dist/*.whl example-career.fm
+      # The live page runs main's reader.py with the newest fmsave on PyPI, so the reader must
+      # also work with that release, not only with the code on this branch.
+      - name: Read the example career in Pyodide with the fmsave the page loads
+        run: |
+          uv run --locked python scripts/app_pins.py released-pins.json
+          version="$(uv run --locked python -c "import json; print(json.load(open('released-pins.json'))['fmsave'])")"
+          uvx --python 3.14.10 --from pip==26.3 pip download \
+            --quiet --no-deps --only-binary=:all: --dest released "fmsave==${version}"
+          node scripts/app-smoke/smoke.mjs released/fmsave-*.whl example-career.fm
+
+  test-windows:
+    name: Tests (Windows, Python ${{ matrix.python-version }}, shard ${{ matrix.shard }})
+    needs: paths
+    if: needs.paths.outputs.extended == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(github.event.repository.private && '["3.14"]' || '["3.12","3.13","3.14"]') }}
+        shard: ${{ fromJSON(github.event.repository.private && '["1/1"]' || '["1/2","2/2"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: false
+      - run: uv sync --locked --group ci
+      - name: Run tests
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: uv run --locked --group ci python -m pytest -p scripts.pytest_shard --shard "$env:TEST_SHARD" -n auto --maxprocesses=4 -m "not corpus"
+
+  # Public repositories also test the remaining Python and operating system combinations.
+  test-matrix:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    if: needs.paths.outputs.extended == 'true' && github.event.repository.private == false
+    needs: paths
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+        exclude:
+          # Run by the Linux test job on both public and private repositories.
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.14"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: false
+      - run: uv sync --locked --group ci
+      # The corpus tier needs private saves that are not here, as in every job above.
+      - name: Run tests
+        run: uv run --locked --group ci pytest -n auto --maxprocesses=4 -m "not corpus"
+
+  check:
+    name: check
+    needs: [paths, checks, test, docs, web-app, test-windows, test-matrix]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          PATHS_RESULT: ${{ needs.paths.result }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          WEB_APP_RESULT: ${{ needs.web-app.result }}
+          WINDOWS_RESULT: ${{ needs.test-windows.result }}
+          MATRIX_RESULT: ${{ needs.test-matrix.result }}
+          EXTENDED: ${{ needs.paths.outputs.extended }}
+          PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
+        run: |
+          test "$PATHS_RESULT" = success
+          test "$CHECKS_RESULT" = success
+          test "$DOCS_RESULT" = success
+
+          case "$EXTENDED" in true|false) ;; *) exit 1 ;; esac
+          expected_tests=skipped
+          expected_windows=skipped
+          expected_matrix=skipped
+          if [ "$EXTENDED" = true ]; then
+            expected_tests=success
+            expected_windows=success
+            if [ "$PRIVATE_REPOSITORY" = false ]; then
+              expected_matrix=success
+            fi
+          fi
+          test "$TEST_RESULT" = "$expected_tests"
+          test "$WEB_APP_RESULT" = "$expected_tests"
+          test "$WINDOWS_RESULT" = "$expected_windows"
+          test "$MATRIX_RESULT" = "$expected_matrix"

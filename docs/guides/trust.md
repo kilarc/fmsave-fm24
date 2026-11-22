@@ -1,0 +1,151 @@
+---
+myst:
+  html_meta:
+    description: "How to tell whether an fmsave field is verified or unconfirmed, how often it is present, and whether its reader passed its checks."
+---
+
+# Trusting a number
+
+Check a field's status, coverage and reader checks before relying on it. These answer different
+questions: what a value means, how often it is present, and whether the reader passed its checks.
+
+## Verified or unconfirmed
+
+Verified means the value was checked against what the game shows. Unconfirmed means its
+meaning has not been confirmed on a game screen.
+
+```python
+import fmsave
+
+fmsave.field_status(fmsave.Player, "attributes.finishing")  # "verified"
+fmsave.field_status(fmsave.Player, "contract.wage")  # "unconfirmed"
+```
+
+Dots reach into groups. A field with no registered status raises `KeyError`.
+An unconfirmed field needs independent evidence before you treat its meaning as established.
+
+## Coverage measures presence
+
+`coverage` gives the share of records whose value is not `None`, per flat column.
+
+```python
+with fmsave.open("career.fm") as career_save:
+    squad = career_save.players().where(club_uid=career_save.managed_clubs()[0].club_uid)
+
+squad.coverage["contract_wage"]
+squad.coverage["loan_parent_club_name"]
+```
+
+Missing values can mean the save omitted data, a join could not resolve, or fmsave could not decode
+it. Coverage alone cannot distinguish these. See [What a save holds](what-a-save-holds.md).
+A missing match score does not mean a 0-0 result.
+
+## Reader checks
+
+Checks test completeness, joins, and expected ranges. Population sizes, typical ranges, parser
+coverage, and comparisons between historical and current career state are advisory. They warn
+and return the table even in strict mode. This includes age and height distributions, suspension
+rates, missing optional data, and match-minute expectations.
+
+Strict mode enforces checks backed by record integrity, such as conflicting identities,
+incomplete declared lists, and inconsistent finance arithmetic. These checks warn by default
+in FM26 and FM27 and raise when you opt into strict mode. Passing them does not prove that
+every decoded value is correct.
+
+```python
+with fmsave.open("career.fm", strict=True) as career_save:
+    squad = career_save.players()  # raises ReaderCheckError on a failed blocking check
+```
+
+When player records share a UID, fmsave warns and returns the players whose UIDs are unique.
+References to omitted players stay unresolved. In strict mode the duplicate UID check raises.
+
+A structural failure that prevents a table from being decoded raises `ReaderCheckError` in either
+mode. Empty output can be valid: `player_match_stats()` accepts it when every player explicitly
+has no stored history. Missing or incomplete histories still fail checks.
+
+An empty optional population has no records to compare. Its integrity checks are marked
+unapplied; population warnings remain visible. Job vacancies can be read without a save clock.
+They warn that clock validation is unavailable and still check the dates within each record.
+
+## Validation reports
+
+`validate_save` runs every reader and collects its outcome without emitting reader warnings or
+raising reader errors.
+
+```python
+with fmsave.open("career.fm") as career_save:
+    report = fmsave.validate_save(career_save)
+
+for reader in report.readers:
+    print(reader.reader, reader.status, reader.record_count)
+    # "players" "ok" 124310
+```
+
+Club uid 0 is valid. A club reference is missing when it is `None`, so use `is not None`
+to keep valid references in filters.
+
+A reader's status is `ok` when it returns a table without blocking failures, `failed` when a
+blocking check fails, or `error` when another reader error occurs. Advisory failures appear
+as warnings in text reports and carry `"advisory": true` in JSON. They leave coverage visible.
+Each `ReaderValidation` also carries `gates`, `coverage`, and `anomalies`.
+
+The same report is available from the command line:
+
+```console
+fmsave validate career.fm
+fmsave validate career.fm --json
+```
+
+```text
+players: ok (124310 records)
+injuries: failed (630 records)
+  injury_log_dates = 0.71 expected 0.9..1
+game FM26, build 26.1.0+1234567
+```
+
+The report contains checks, counts and rates, without names, uids or text from your save. Paste it
+into a [GitHub issue](https://github.com/rhiever/fmsave/issues) when a reader misbehaves. Never
+post the save itself or a link to one. To share it privately, which is the fastest route to a fix,
+email a link to the address on [the maintainer's GitHub profile](https://github.com/rhiever).
+
+## Money and game builds
+
+Money uses the save's stored unit. Wages, values and balances are not converted to the currency
+the game displays. Check that unit before interpreting a difference.
+
+`UnknownBuildWarning` means fmsave does not recognize that FM26 build. Readers still run; inspect
+their checks before relying on the output. fmsave also issues it for every FM27 save, because
+FM27 coverage is partial, and for an FM27 build with no registered layouts it also says that
+fmsave tries layouts from registered FM27 builds and warns when it uses a different schema.
+
+
+## FM27 coverage
+
+FM27 build `27.0.0+2486695` opens normally and reports `known_build` true: every reader has a
+layout registered for it, which does not confirm any field's meaning.
+
+Other FM27 builds report `known_build` false, and `fmsave info` shows them as unverified.
+Readers prefer the build's own layout and a matching section schema. If the schema differs,
+they try an unambiguous FM27 layout and warn that the fields are unverified. A reader whose
+structure does not fit reports the decode failure. The save summary and `game_info` must
+still pass their metadata checks for the save to open. Schema-free regions such as the fixture
+calendar use their stored markers. FM27 readers use FM27 layouts. Other game editions need
+their own layouts.
+
+FM27 returns decoded rows with warnings by default. Invalid sponsorship lists are skipped and
+the warning explains the gap in coverage. The validation report lists failed readers and shows FM27 field statuses. For borrowed match
+report layouts it also records the layout build and schema. When a reader can report a failure
+reason without including save data, the report includes that reason. On registered builds, it marks the fixture and official
+`referee_id` fields verified. Staff age, birth date,
+and contract end date are verified. The 21 staff ratings added in 0.10.0 are also
+verified against the in-game rating labels. Global field-status labels describe FM26.
+
+fmsave sets no fixed size limit on a save, for FM26 or FM27, so a large database opens however
+big it grows. To refuse a damaged or crafted file before memory is spent, a part of a save
+past 64 MiB may decompress to at most 64 times its compressed size, and a whole save to at
+most 32 times its file size. Real saves stay far below both: no part over 1 MiB expands more
+than about 41 times, and no save more than about 5 times. A save past either bound raises
+`CorruptSaveError`, whose message gives the ratio and asks for a report if the game opens it.
+Finance rows describe historical snapshots, not current-month live totals; stored money is
+not converted to the game's display currency. Match the period and units before comparing.

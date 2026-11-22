@@ -1,0 +1,85 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+  # The release workflow calls this after publishing, so the web app's fmsave pin moves to
+  # the new version as soon as PyPI lists it.
+  workflow_call:
+    inputs:
+      wait-for-version:
+        description: "An fmsave version to wait for on PyPI and pin the web app to"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # After a release, deploy the newest main rather than the commit the release ran
+          # from, so a redeploy never rolls the site back.
+          ref: ${{ inputs.wait-for-version != '' && github.event.repository.default_branch || '' }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --locked --group docs
+      - name: Build docs
+        run: uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
+      # The link-preview image is a screenshot of a committed HTML card, since the repository
+      # holds no binary files. A failure only loses the preview, so it warns instead.
+      - name: Render the web app's link-preview image
+        run: |
+          google-chrome --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+            --window-size=1200,630 --virtual-time-budget=5000 \
+            --screenshot=docs/_build/html/app/og.png "file://${GITHUB_WORKSPACE}/docs/app/og-card.html" \
+            || echo "::warning::Could not render docs/_build/html/app/og.png"
+      - name: Pin the web app to fmsave on PyPI
+        env:
+          WAIT_FOR_VERSION: ${{ inputs.wait-for-version }}
+        run: |
+          if [ -n "${WAIT_FOR_VERSION}" ]; then
+            uv run --locked --group docs python scripts/app_pins.py docs/_build/html/app/pins.json --wait-for "${WAIT_FOR_VERSION}"
+          else
+            uv run --locked --group docs python scripts/app_pins.py docs/_build/html/app/pins.json
+          fi
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: docs/_build/html
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
